@@ -22,17 +22,19 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/registry"
+
+	"github.com/xelalexv/dregsy/internal/pkg/auth"
 )
 
 //
-func newIndex(reg, filter string, insecure bool, auth *Auth) ListSource {
+func newIndex(reg, filter string, insecure bool, creds *auth.Credentials) ListSource {
 
 	ret := &index{filter: filter}
 
 	ret.auth = &types.AuthConfig{
-		Username:      auth.Username,
-		Password:      auth.Password,
-		RegistryToken: auth.Token,
+		Username:      creds.Username(),
+		Password:      creds.Password(),
+		RegistryToken: creds.Token().Raw(),
 	}
 	ret.opts = &registry.ServiceOptions{}
 

@@ -19,15 +19,13 @@ package sync
 import (
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	log "github.com/sirupsen/logrus"
-)
 
-//
-type authRefresher interface {
-	refresh() error
-}
+	"github.com/xelalexv/dregsy/internal/pkg/auth"
+)
 
 //
 type Location struct {
@@ -36,7 +34,7 @@ type Location struct {
 	SkipTLSVerify bool           `yaml:"skip-tls-verify"`
 	AuthRefresh   *time.Duration `yaml:"auth-refresh"`
 	//
-	refresher authRefresher
+	creds *auth.Credentials
 }
 
 //
@@ -49,6 +47,18 @@ func (l *Location) validate() error {
 	if l.Registry == "" {
 		return errors.New("registry not set")
 	}
+
+	// move Auth into credentials
+	if l.Auth != "" {
+		crd, err := auth.NewCredentialsFromAuth(l.Auth)
+		if err != nil {
+			return fmt.Errorf("invalid Auth: %v", err)
+		}
+		l.creds = crd
+	} else {
+		l.creds = &auth.Credentials{}
+	}
+	l.Auth = ""
 
 	var interval time.Duration
 
@@ -63,7 +73,8 @@ func (l *Location) validate() error {
 	}
 
 	if l.IsECR() {
-		l.refresher = newECRAuthRefresher(l, interval)
+		_, region, account := l.GetECR()
+		l.creds.SetRefresher(auth.NewECRAuthRefresher(account, region, interval))
 	} else if interval > 0 {
 		return fmt.Errorf(
 			"'%s' wants authentication refresh, but is not an ECR registry",
@@ -71,16 +82,56 @@ func (l *Location) validate() error {
 	}
 
 	if l.IsGCR() {
-		l.refresher = newGCRAuthRefresher(l)
+		l.creds.SetRefresher(auth.NewGCRAuthRefresher())
 	}
 
 	return nil
 }
 
 //
+func (l *Location) GetAuth() string {
+	if l.creds != nil {
+		return l.creds.Auth()
+	}
+	log.WithField("registry", l.Registry).Debug("no credentials")
+	return ""
+}
+
+//
 func (l *Location) RefreshAuth() error {
-	if l.refresher == nil {
+	if l.creds == nil {
 		return nil
 	}
-	return l.refresher.refresh()
+	log.WithField("registry", l.Registry).Info("refreshing credentials")
+	return l.creds.Refresh()
+}
+
+//
+func (l *Location) IsECR() bool {
+	ecr, _, _ := l.GetECR()
+	return ecr
+}
+
+//
+func (l *Location) GetECR() (ecr bool, region, account string) {
+
+	url := strings.Split(l.Registry, ".")
+
+	ecr = (len(url) == 6 || len(url) == 7) && url[1] == "dkr" && url[2] == "ecr" &&
+		url[4] == "amazonaws" && url[5] == "com" && (len(url) == 6 || url[6] == "cn")
+
+	if ecr {
+		region = url[3]
+		account = url[0]
+	} else {
+		region = ""
+		account = ""
+	}
+
+	return
+}
+
+//
+func (l *Location) IsGCR() bool {
+	return strings.HasSuffix(l.Registry, ".gcr.io")
 }

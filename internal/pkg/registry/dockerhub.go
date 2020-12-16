@@ -21,6 +21,10 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+
+	log "github.com/sirupsen/logrus"
+
+	"github.com/xelalexv/dregsy/internal/pkg/auth"
 )
 
 //
@@ -33,34 +37,55 @@ type DHRepoDescriptor struct {
 	User        string `json:"user",required`
 	Name        string `json:"name",required`
 	Namespace   string `json:"namespace",required`
-	RepoType    string `json:"repository_type",required`
+	Type        string `json:"repository_type",required`
 	Description string `json:"description",omitempty`
 	IsPrivate   bool   `json:"is_private",omitempty`
+
+	// additional fields; include later on if needed
+	//
+	// status 				int
+	// is_automated 		bool
+	// can_edit 			bool
+	// star_count 			int
+	// pull_count 			int
+	// last_updated 		time.Time e.g. "2020-04-27T14:25:06.739261Z"
+	// is_migrated 			bool
+	// collaborator_count	int
+	// affiliation 			string
 }
 
 //
-func newDockerhub(reg string, insecure bool, auth *Auth) ListSource {
-	return &dockerhub{auth: auth}
+func newDockerhub(reg string, insecure bool, creds *auth.Credentials) ListSource {
+	return &dockerhub{creds: creds}
 }
 
 //
 type dockerhub struct {
-	auth *Auth
+	creds *auth.Credentials
 }
 
 //
 func (d *dockerhub) Retrieve() ([]string, error) {
 
-	token, err := d.getToken()
-	if err != nil {
-		return nil, err
+	var err error
+	token := d.creds.Token()
+
+	if token == nil || token.IsExpired() {
+		token, err = d.getToken()
+		if err != nil {
+			return nil, err
+		}
+		d.creds.SetToken(token)
+	} else {
+		log.Debug("token already present and still valid")
 	}
 
 	url := fmt.Sprintf(
 		"https://hub.docker.com/v2/repositories/%s/?page_size=1000",
-		d.auth.Username)
+		d.creds.Username())
 	req, err := http.NewRequest("GET", url, nil)
-	req.Header.Add("Authorization", fmt.Sprintf("JWT %s", token))
+	req.Header.Set("Accept", "application/json")
+	req.Header.Set("Authorization", fmt.Sprintf("JWT %s", token.Raw()))
 
 	client := &http.Client{}
 	resp, err := client.Do(req)
@@ -76,7 +101,9 @@ func (d *dockerhub) Retrieve() ([]string, error) {
 
 	ret := make([]string, 0, len(list.Items))
 	for _, r := range list.Items {
-		ret = append(ret, fmt.Sprintf("%s/%s", r.User, r.Name))
+		if r.Type == "image" {
+			ret = append(ret, fmt.Sprintf("%s/%s", r.Namespace, r.Name))
+		}
 	}
 
 	return ret, nil
@@ -89,23 +116,25 @@ func (d *dockerhub) Ping() error {
 }
 
 //
-func (d *dockerhub) getToken() (string, error) {
+func (d *dockerhub) getToken() (*auth.Token, error) {
 
-	auth := url.Values{
-		"username": {d.auth.Username},
-		"password": {d.auth.Password},
+	log.Debug("getting token")
+
+	vals := url.Values{
+		"username": {d.creds.Username()},
+		"password": {d.creds.Password()},
 	}
 
-	resp, err := http.PostForm("https://hub.docker.com/v2/users/login/", auth)
+	resp, err := http.PostForm("https://hub.docker.com/v2/users/login/", vals)
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	var res map[string]interface{}
 	json.NewDecoder(resp.Body).Decode(&res)
-	token, ok := res["token"].(string)
-	if !ok {
-		return "", fmt.Errorf("received token is not a string")
+	if token, ok := res["token"].(string); ok {
+		log.Debug("received token")
+		return auth.NewToken(token), nil
 	}
-	return token, nil
+	return nil, fmt.Errorf("received token is not a string")
 }

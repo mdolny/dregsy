@@ -25,19 +25,21 @@ import (
 	gcrauthn "github.com/google/go-containerregistry/pkg/authn"
 	gcrname "github.com/google/go-containerregistry/pkg/name"
 	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
+
+	"github.com/xelalexv/dregsy/internal/pkg/auth"
 )
 
 //
-func newCatalog(reg string, insecure bool, auth *Auth) ListSource {
+func newCatalog(reg string, insecure bool, creds *auth.Credentials) ListSource {
 	return &catalog{
 		registry: reg,
 		conf: &oauth2.Config{
-			ClientID: auth.Username,
+			ClientID: creds.Username(),
 			Endpoint: oauth2.Endpoint{
 				TokenURL: fmt.Sprintf("https://%s/token", reg),
 			},
 		},
-		auth: auth,
+		creds: creds,
 	}
 }
 
@@ -45,7 +47,7 @@ func newCatalog(reg string, insecure bool, auth *Auth) ListSource {
 type catalog struct {
 	registry string
 	conf     *oauth2.Config
-	auth     *Auth
+	creds    *auth.Credentials
 }
 
 //
@@ -58,8 +60,8 @@ func (c *catalog) Retrieve() ([]string, error) {
 
 	ret, err := gcrremote.CatalogPage(reg, "", 100,
 		gcrremote.WithAuth(&gcrauthn.Basic{
-			Username: c.auth.Username,
-			Password: c.auth.Password,
+			Username: c.creds.Username(),
+			Password: c.creds.Password(),
 		}))
 	if err != nil {
 		return nil, err
@@ -71,6 +73,6 @@ func (c *catalog) Retrieve() ([]string, error) {
 //
 func (c *catalog) Ping() error {
 	_, err := c.conf.PasswordCredentialsToken(
-		context.TODO(), c.auth.Username, c.auth.Password)
+		context.TODO(), c.creds.Username(), c.creds.Password())
 	return err
 }

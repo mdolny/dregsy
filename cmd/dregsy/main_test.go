@@ -116,7 +116,8 @@ func tryConfig(th *test.TestHelper, file string, ticks int, wait time.Duration,
 			ref := fmt.Sprintf("%s%s", t.Target.Registry, m.To)
 			th.AssertNoError(t.Target.RefreshAuth())
 			tags, err := skopeo.ListAllTags(ref,
-				skopeo.DecodeJSONAuth(t.Target.Auth), "", t.Target.SkipTLSVerify)
+				skopeo.DecodeJSONAuth(t.Target.GetAuth()),
+				"", t.Target.SkipTLSVerify)
 			th.AssertNoError(err)
 			th.AssertEquivalentSlices(m.Tags, tags)
 		}

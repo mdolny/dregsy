@@ -20,24 +20,23 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
+
+	log "github.com/sirupsen/logrus"
+
+	"github.com/xelalexv/dregsy/internal/pkg/auth"
 )
 
 //
-type Auth struct {
-	Username string
-	Password string
-	Token    string
-}
-
-//
-func NewRepoList(registry, filter string, auth *Auth) (*RepoList, error) {
+func NewRepoList(registry, filter string, creds *auth.Credentials) (
+	*RepoList, error) {
 
 	rxf, err := CompileRegex(filter)
 	if err != nil {
 		return nil, err
 	}
 
-	list := &RepoList{registry: registry, filter: rxf, auth: auth}
+	list := &RepoList{registry: registry, filter: rxf, creds: creds}
 
 	insecure := false
 	reg := ""
@@ -56,11 +55,11 @@ func NewRepoList(registry, filter string, auth *Auth) (*RepoList, error) {
 	switch server {
 
 	case "registry.hub.docker.com":
-		//list.source = newIndex(reg, auth.Username, insecure, auth)
-		list.source = newDockerhub(reg, insecure, auth)
+		//list.source = newIndex(reg, creds.Username(), insecure, creds)
+		list.source = newDockerhub(reg, insecure, creds)
 
 	default:
-		list.source = newCatalog(reg, insecure, auth)
+		list.source = newCatalog(reg, insecure, creds)
 	}
 
 	return list, nil
@@ -69,28 +68,37 @@ func NewRepoList(registry, filter string, auth *Auth) (*RepoList, error) {
 //
 type RepoList struct {
 	registry string
-	auth     *Auth
 	filter   *regexp.Regexp
 	repos    []string
+	expiry   time.Time
+	creds    *auth.Credentials
 	source   ListSource
 }
 
 //
 func (l *RepoList) Get() ([]string, error) {
 
+	if time.Now().Before(l.expiry) {
+		log.Debug("list still valid, reusing")
+		return l.repos, nil
+	}
+
+	log.Debug("retrieving list")
+
 	raw, err := l.source.Retrieve()
 	if err != nil {
 		return nil, err
 	}
 
-	ret := make([]string, 0, len(raw))
+	l.expiry = time.Now().Add(10 * time.Minute) // FIXME: parameterize
+	l.repos = make([]string, 0, len(raw))
 	for _, r := range raw {
 		if l.filter.MatchString(r) {
-			ret = append(ret, r)
+			l.repos = append(l.repos, r)
 		}
 	}
 
-	return ret, nil
+	return l.repos, nil
 }
 
 //

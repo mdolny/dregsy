@@ -196,8 +196,10 @@ func (s *Sync) syncTask(t *Task) {
 			t.fail(true)
 			continue
 		}
-		if err := s.relay.Sync(src, t.Source.Auth, t.Source.SkipTLSVerify,
-			trgt, t.Target.Auth, t.Target.SkipTLSVerify, m.Tags, t.Verbose); err != nil {
+
+		if err := s.relay.Sync(src, t.Source.GetAuth(), t.Source.SkipTLSVerify,
+			trgt, t.Target.GetAuth(), t.Target.SkipTLSVerify, m.Tags,
+			t.Verbose); err != nil {
 			log.Error(err)
 			t.fail(true)
 		}
