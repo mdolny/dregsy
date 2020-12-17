@@ -28,6 +28,12 @@ import (
 )
 
 //
+type ListSource interface {
+	Ping() error
+	Retrieve() ([]string, error)
+}
+
+//
 func NewRepoList(registry, filter string, creds *auth.Credentials) (
 	*RepoList, error) {
 
@@ -36,7 +42,7 @@ func NewRepoList(registry, filter string, creds *auth.Credentials) (
 		return nil, err
 	}
 
-	list := &RepoList{registry: registry, filter: rxf, creds: creds}
+	list := &RepoList{registry: registry, filter: rxf}
 
 	insecure := false
 	reg := ""
@@ -55,10 +61,22 @@ func NewRepoList(registry, filter string, creds *auth.Credentials) (
 	switch server {
 
 	case "registry.hub.docker.com":
+		// DockerHub does not expose the registry catalog API, but separate
+		// APIs for listing and searching. These APIs use tokens that are
+		// different from the one used for normal registry actions, so we
+		// clone the credentials for list use.
+		//
 		//list.source = newIndex(reg, creds.Username(), insecure, creds)
-		list.source = newDockerhub(reg, insecure, creds)
+		if credsCopy, err := auth.NewCredentialsFromBasic(
+			creds.Username(), creds.Password()); err != nil {
+			return nil, err
+		} else {
+			list.source = newDockerhub(reg, insecure, credsCopy)
+		}
 
 	default:
+		// for listing via catalog API, we can use the same credentials as for
+		// push & pull
 		list.source = newCatalog(reg, insecure, creds)
 	}
 
@@ -71,7 +89,6 @@ type RepoList struct {
 	filter   *regexp.Regexp
 	repos    []string
 	expiry   time.Time
-	creds    *auth.Credentials
 	source   ListSource
 }
 
@@ -99,12 +116,6 @@ func (l *RepoList) Get() ([]string, error) {
 	}
 
 	return l.repos, nil
-}
-
-//
-type ListSource interface {
-	Ping() error
-	Retrieve() ([]string, error)
 }
 
 //

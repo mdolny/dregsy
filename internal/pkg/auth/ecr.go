@@ -80,7 +80,7 @@ func (rf *ecrAuthRefresher) Refresh(creds *Credentials) error {
 
 		creds.username = strings.TrimSpace(split[0])
 		creds.password = strings.TrimSpace(split[1])
-		creds.jsonAuth = true
+		creds.auther = BasicAuthJSON
 		rf.expiry = time.Now().Add(rf.interval)
 
 		return nil

@@ -72,7 +72,7 @@ func (rf *gcrAuthRefresher) Refresh(creds *Credentials) error {
 
 	creds.username = "oauth2accesstoken"
 	creds.password = authToken
-	creds.jsonAuth = true
+	creds.auther = BasicAuthJSON
 	rf.expiry = expiry
 
 	return nil

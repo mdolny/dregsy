@@ -16,24 +16,14 @@
 
 package auth
 
-import (
-	"encoding/base64"
-	"encoding/json"
-	"fmt"
-	"strings"
-)
-
 //
 type Refresher interface {
 	Refresh(creds *Credentials) error
 }
 
 //
-func NewCredentialsFromBasic(username, password string, json bool) (*Credentials, error) {
-	return &Credentials{
-		username: username,
-		password: password,
-		jsonAuth: json}, nil
+func NewCredentialsFromBasic(username, password string) (*Credentials, error) {
+	return &Credentials{username: username, password: password}, nil
 }
 
 //
@@ -43,35 +33,7 @@ func NewCredentialsFromToken(token string) (*Credentials, error) {
 
 //
 func NewCredentialsFromAuth(auth string) (*Credentials, error) {
-
-	data, err := base64.StdEncoding.DecodeString(auth)
-	if err != nil {
-		return nil, err
-	}
-
-	ret := &Credentials{}
-
-	crd := &jsonCreds{}
-	if err := json.Unmarshal(data, crd); err != nil {
-		ret.jsonAuth = false
-		parts := strings.SplitN(string(data), ":", 2)
-		ret.username = parts[0]
-		if len(parts) > 1 {
-			ret.password = parts[1]
-		}
-	} else {
-		ret.jsonAuth = true
-		ret.username = crd.User
-		ret.password = crd.Pass
-	}
-
-	return ret, nil
-}
-
-//
-type jsonCreds struct {
-	User string `json:"username"`
-	Pass string `json:"password"`
+	return decode(auth)
 }
 
 //
@@ -79,10 +41,10 @@ type Credentials struct {
 	//
 	username string
 	password string
-	jsonAuth bool
 	//
 	token     *Token
 	refresher Refresher
+	auther    Auther
 }
 
 //
@@ -97,18 +59,15 @@ func (c *Credentials) Password() string {
 
 //
 func (c *Credentials) Auth() string {
-
-	if c.username == "" && c.password == "" {
-		return ""
+	if c.auther == nil {
+		return BasicAuth(c)
 	}
+	return c.auther(c)
+}
 
-	template := "%s:%s"
-	if c.jsonAuth {
-		template = `{"username": "%s", "password": "%s"}`
-	}
-
-	return base64.StdEncoding.EncodeToString(
-		[]byte(fmt.Sprintf(template, c.username, c.password)))
+//
+func (c *Credentials) SetAuther(a Auther) {
+	c.auther = a
 }
 
 //
