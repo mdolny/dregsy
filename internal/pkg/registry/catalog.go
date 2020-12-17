@@ -22,15 +22,17 @@ import (
 
 	"golang.org/x/oauth2"
 
-	gcrauthn "github.com/google/go-containerregistry/pkg/authn"
-	gcrname "github.com/google/go-containerregistry/pkg/name"
-	gcrremote "github.com/google/go-containerregistry/pkg/v1/remote"
+	gocrauthn "github.com/google/go-containerregistry/pkg/authn"
+	gocrname "github.com/google/go-containerregistry/pkg/name"
+	gocrremote "github.com/google/go-containerregistry/pkg/v1/remote"
 
 	"github.com/xelalexv/dregsy/internal/pkg/auth"
 )
 
 //
-func newCatalog(reg string, insecure bool, creds *auth.Credentials) ListSource {
+func newCatalog(reg string, insecure, bearer bool,
+	creds *auth.Credentials) ListSource {
+
 	return &catalog{
 		registry: reg,
 		conf: &oauth2.Config{
@@ -39,7 +41,8 @@ func newCatalog(reg string, insecure bool, creds *auth.Credentials) ListSource {
 				TokenURL: fmt.Sprintf("https://%s/token", reg),
 			},
 		},
-		creds: creds,
+		bearer: bearer,
+		creds:  creds,
 	}
 }
 
@@ -47,22 +50,35 @@ func newCatalog(reg string, insecure bool, creds *auth.Credentials) ListSource {
 type catalog struct {
 	registry string
 	conf     *oauth2.Config
+	bearer   bool
 	creds    *auth.Credentials
 }
 
 //
 func (c *catalog) Retrieve() ([]string, error) {
 
-	reg, err := gcrname.NewRegistry(c.registry)
+	reg, err := gocrname.NewRegistry(c.registry)
 	if err != nil {
 		return nil, err
 	}
 
-	ret, err := gcrremote.CatalogPage(reg, "", 100,
-		gcrremote.WithAuth(&gcrauthn.Basic{
+	if err := c.creds.Refresh(); err != nil {
+		return nil, err
+	}
+
+	var auth gocrauthn.Authenticator
+
+	if c.bearer {
+		auth = &gocrauthn.Bearer{Token: c.creds.Password()}
+	} else {
+		auth = &gocrauthn.Basic{
 			Username: c.creds.Username(),
 			Password: c.creds.Password(),
-		}))
+		}
+	}
+
+	// FIXME: parameterize max page size
+	ret, err := gocrremote.CatalogPage(reg, "", 100, gocrremote.WithAuth(auth))
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +88,7 @@ func (c *catalog) Retrieve() ([]string, error) {
 
 //
 func (c *catalog) Ping() error {
+	// TODO: possibly use this to get token for push/pull?
 	_, err := c.conf.PasswordCredentialsToken(
 		context.TODO(), c.creds.Username(), c.creds.Password())
 	return err

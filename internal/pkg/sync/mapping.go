@@ -17,30 +17,89 @@
 package sync
 
 import (
-	"errors"
+	"fmt"
+	"regexp"
+	"strings"
 )
+
+//
+const RegexpPrefix = "regex:"
 
 //
 type Mapping struct {
 	From string   `yaml:"from"`
 	To   string   `yaml:"to"`
 	Tags []string `yaml:"tags"`
+	//
+	fromFilter *regexp.Regexp
 }
 
 //
 func (m *Mapping) validate() error {
 
 	if m == nil {
-		return errors.New("mapping is nil")
+		return fmt.Errorf("mapping is nil")
 	}
 
 	if m.From == "" {
-		return errors.New("mapping without 'From' path")
+		return fmt.Errorf("mapping without 'From' path")
 	}
 
-	if m.To == "" {
-		m.To = m.From
+	if m.isRegexp() {
+		regex := m.From[len(RegexpPrefix):]
+		var err error
+		if m.fromFilter, err = compileRegex(regex); err != nil {
+			return fmt.Errorf("invalid regular expression '%s': %v", regex, err)
+		}
+
+	} else {
+		if m.To == "" {
+			m.To = m.From
+		}
+		m.From = normalizePath(m.From)
 	}
+
+	m.To = normalizePath(m.To)
 
 	return nil
+}
+
+//
+func (m *Mapping) filterRepos(repos []string) []string {
+
+	if m.isRegexp() {
+		ret := make([]string, 0, len(repos))
+		for _, r := range repos {
+			if m.fromFilter.MatchString(r) {
+				ret = append(ret, normalizePath(r))
+			}
+		}
+		return ret
+	}
+
+	return repos
+}
+
+//
+func (m *Mapping) isRegexp() bool {
+	return strings.HasPrefix(m.From, RegexpPrefix)
+}
+
+//
+func compileRegex(v string) (*regexp.Regexp, error) {
+	if !strings.HasPrefix(v, "^") {
+		v = fmt.Sprintf("^%s", v)
+	}
+	if !strings.HasSuffix(v, "$") {
+		v = fmt.Sprintf("%s$", v)
+	}
+	return regexp.Compile(v)
+}
+
+//
+func normalizePath(p string) string {
+	if strings.HasPrefix(p, "/") {
+		return p
+	}
+	return "/" + p
 }

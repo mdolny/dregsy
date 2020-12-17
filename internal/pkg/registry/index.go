@@ -32,10 +32,13 @@ func newIndex(reg, filter string, insecure bool, creds *auth.Credentials) ListSo
 	ret := &index{filter: filter}
 
 	ret.auth = &types.AuthConfig{
-		Username:      creds.Username(),
-		Password:      creds.Password(),
-		RegistryToken: creds.Token().Raw(),
+		Username: creds.Username(),
+		Password: creds.Password(),
 	}
+	if creds.Token() != nil {
+		ret.auth.RegistryToken = creds.Token().Raw()
+	}
+
 	ret.opts = &registry.ServiceOptions{}
 
 	if insecure {
@@ -62,6 +65,7 @@ func (i *index) Retrieve() ([]string, error) {
 		return nil, err
 	}
 
+	// FIXME: consider using token
 	res, err := svc.Search(context.TODO(), i.filter, 100, i.auth, "dregsy", nil)
 	if err != nil {
 		return nil, err

@@ -18,7 +18,6 @@ package registry
 
 import (
 	"fmt"
-	"regexp"
 	"strings"
 	"time"
 
@@ -28,21 +27,34 @@ import (
 )
 
 //
+type ListSourceType string
+
+const (
+	Catalog   ListSourceType = "catalog"
+	DockerHub                = "dockerhub"
+	Index                    = "index"
+)
+
+//
+func IsValidListSourceType(t ListSourceType) bool {
+	switch t {
+	case Catalog, DockerHub, Index:
+		return true
+	}
+	return false
+}
+
+//
 type ListSource interface {
 	Ping() error
 	Retrieve() ([]string, error)
 }
 
 //
-func NewRepoList(registry, filter string, creds *auth.Credentials) (
+func NewRepoList(registry string, typ ListSourceType, creds *auth.Credentials) (
 	*RepoList, error) {
 
-	rxf, err := CompileRegex(filter)
-	if err != nil {
-		return nil, err
-	}
-
-	list := &RepoList{registry: registry, filter: rxf}
+	list := &RepoList{registry: registry}
 
 	insecure := false
 	reg := ""
@@ -58,26 +70,40 @@ func NewRepoList(registry, filter string, creds *auth.Credentials) (
 
 	server := strings.SplitN(reg, ":", 2)[0]
 
-	switch server {
-
-	case "registry.hub.docker.com":
-		// DockerHub does not expose the registry catalog API, but separate
-		// APIs for listing and searching. These APIs use tokens that are
-		// different from the one used for normal registry actions, so we
-		// clone the credentials for list use.
-		//
-		//list.source = newIndex(reg, creds.Username(), insecure, creds)
-		if credsCopy, err := auth.NewCredentialsFromBasic(
-			creds.Username(), creds.Password()); err != nil {
+	// DockerHub does not expose the registry catalog API, but separate APIs for
+	// listing and searching. These APIs use tokens that are different from the
+	// one used for normal registry actions, so we clone the credentials for list
+	// use. For listing via catalog API, we can use the same credentials as for
+	// push & pull.
+	listCreds := creds
+	if server == "registry.hub.docker.com" {
+		var err error
+		listCreds, err = auth.NewCredentialsFromBasic(
+			creds.Username(), creds.Password())
+		if err != nil {
 			return nil, err
-		} else {
-			list.source = newDockerhub(reg, insecure, credsCopy)
 		}
+		if typ != DockerHub && typ != Index {
+			return nil, fmt.Errorf(
+				"DockerHub only supports list types '%s' and '%s'",
+				DockerHub, Index)
+		}
+	}
+
+	switch typ {
+
+	case DockerHub:
+		list.source = newDockerhub(reg, insecure, listCreds)
+
+	case Index:
+		list.source = newIndex(reg, listCreds.Username(), insecure, listCreds)
+
+	case Catalog, "":
+		list.source = newCatalog(
+			reg, insecure, strings.HasSuffix(server, ".gcr.io"), listCreds)
 
 	default:
-		// for listing via catalog API, we can use the same credentials as for
-		// push & pull
-		list.source = newCatalog(reg, insecure, creds)
+		return nil, fmt.Errorf("invalid list source type '%s'", typ)
 	}
 
 	return list, nil
@@ -86,7 +112,6 @@ func NewRepoList(registry, filter string, creds *auth.Credentials) (
 //
 type RepoList struct {
 	registry string
-	filter   *regexp.Regexp
 	repos    []string
 	expiry   time.Time
 	source   ListSource
@@ -102,29 +127,12 @@ func (l *RepoList) Get() ([]string, error) {
 
 	log.Debug("retrieving list")
 
-	raw, err := l.source.Retrieve()
-	if err != nil {
+	var err error
+	if l.repos, err = l.source.Retrieve(); err != nil {
 		return nil, err
 	}
 
 	l.expiry = time.Now().Add(10 * time.Minute) // FIXME: parameterize
-	l.repos = make([]string, 0, len(raw))
-	for _, r := range raw {
-		if l.filter.MatchString(r) {
-			l.repos = append(l.repos, r)
-		}
-	}
 
 	return l.repos, nil
-}
-
-//
-func CompileRegex(v string) (*regexp.Regexp, error) {
-	if !strings.HasPrefix(v, "^") {
-		v = fmt.Sprintf("^%s", v)
-	}
-	if !strings.HasSuffix(v, "$") {
-		v = fmt.Sprintf("%s$", v)
-	}
-	return regexp.Compile(v)
 }

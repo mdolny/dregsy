@@ -25,14 +25,16 @@ import (
 	log "github.com/sirupsen/logrus"
 
 	"github.com/xelalexv/dregsy/internal/pkg/auth"
+	"github.com/xelalexv/dregsy/internal/pkg/registry"
 )
 
 //
 type Location struct {
-	Registry      string         `yaml:"registry"`
-	Auth          string         `yaml:"auth"`
-	SkipTLSVerify bool           `yaml:"skip-tls-verify"`
-	AuthRefresh   *time.Duration `yaml:"auth-refresh"`
+	Registry      string                  `yaml:"registry"`
+	Auth          string                  `yaml:"auth"`
+	SkipTLSVerify bool                    `yaml:"skip-tls-verify"`
+	AuthRefresh   *time.Duration          `yaml:"auth-refresh"`
+	Lister        registry.ListSourceType `yaml:"lister"`
 	//
 	creds *auth.Credentials
 }
@@ -46,6 +48,10 @@ func (l *Location) validate() error {
 
 	if l.Registry == "" {
 		return errors.New("registry not set")
+	}
+
+	if l.Lister != "" && !registry.IsValidListSourceType(l.Lister) {
+		return fmt.Errorf("invalid lister type: %s", l.Lister)
 	}
 
 	// move Auth into credentials
